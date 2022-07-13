@@ -1,0 +1,116 @@
+// Copyright 2016-2018, Pulumi Corporation. All rights reserved.
+
+import { Component, OnDestroy, OnInit } from "@angular/core";
+import { FormControl } from "@angular/forms";
+import { Title } from "@angular/platform-browser";
+import { ActivatedRoute, Router } from "@angular/router";
+
+import { Subscription } from "rxjs";
+
+import { LocalStorageService } from "../../core/services/local-storage.service";
+import { PulumiCookiesService } from "../../core/services/pulumi-cookies.service";
+
+/**
+ * NewProjectComponent is the first step in creating a new project.
+ */
+@Component({
+    templateUrl: "./new-project.component.html",
+    styleUrls: ["./new-project.component.scss"],
+})
+export class NewProjectComponent implements OnInit, OnDestroy {
+    /** The default organization where the project should be created. */
+    organization?: string;
+
+    /** The cloud selector form control */
+    cloudSelector = new FormControl();
+
+    /** The language selector form control. */
+    languageSelector = new FormControl();
+
+    // This can be removed if/when we add VB Kubernetes templates.
+    vbDisabled = false;
+
+    private routeQueryParamsSubscription: Subscription;
+
+    constructor(
+        private router: Router,
+        private activatedRoute: ActivatedRoute,
+        private localStorage: LocalStorageService,
+        private cookieService: PulumiCookiesService,
+        private titleService: Title,
+    ) {}
+
+    ngOnInit() {
+        this.titleService.setTitle("New Project | Pulumi");
+
+        const user = this.cookieService.getUserInfo();
+
+        // This block can be removed if/when we add VB Kubernetes templates.
+        this.cloudSelector.valueChanges.subscribe((_) => {
+            if (this.cloudSelector.value === "kubernetes") {
+                this.vbDisabled = true;
+                const lang = this.languageSelector.value;
+                if (lang === "visualbasic") {
+                    this.languageSelector.setValue(undefined);
+                }
+            } else {
+                this.vbDisabled = false;
+            }
+        });
+
+        this.routeQueryParamsSubscription = this.activatedRoute.queryParamMap.subscribe((params) => {
+            this.organization = params.get("owner") || undefined;
+            // If there's no owner query parameter, re-navigate with the owner query param
+            // set to the current user's GitHub login.
+            if (!this.organization) {
+                this.router.navigate(["/site", "new-project"], {
+                    queryParams: { owner: user.githubLogin },
+                    // Replace the current state in history.
+                    replaceUrl: true,
+                });
+            }
+        });
+
+        const preferredCloud = this.localStorage.getPreferredCloud();
+        if (preferredCloud) {
+            this.cloudSelector.setValue(preferredCloud);
+        }
+
+        const preferredLanguage = this.localStorage.getPreferredLanguage();
+        if (preferredLanguage) {
+            this.languageSelector.setValue(preferredLanguage);
+        }
+    }
+
+    ngOnDestroy() {
+        if (this.routeQueryParamsSubscription) {
+            this.routeQueryParamsSubscription.unsubscribe();
+        }
+    }
+
+    onNextClick() {
+        const cloud: string = this.cloudSelector.value;
+        const language: string = this.languageSelector.value;
+
+        // Save choices in local storage.
+        this.localStorage.setPreferredCloud(cloud);
+        this.localStorage.setPreferredLanguage(language);
+
+        this.router.navigate(["/new"], {
+            queryParams: this.getQueryParams(cloud, language),
+        });
+    }
+
+    private getQueryParams(cloud: string, language: string): { [k: string]: string } {
+        const result = {
+            template: `https://github.com/pulumi/templates/${cloud}-${language}`,
+            wizard: "1",
+        };
+
+        if (this.organization) {
+            result["owner"] = this.organization;
+        }
+
+        return result;
+    }
+}
